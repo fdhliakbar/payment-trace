@@ -1,0 +1,126 @@
+# payment-trace full stack
+# Usage (WSL): podman-compose -f podman-compose.yml up -d --build
+
+name: payment-trace
+
+networks:
+  payment-mesh:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
+services:
+  jaeger:
+    image: docker.io/jaegertracing/all-in-one:1.57
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - payment-mesh
+    restart: unless-stopped
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: payment_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - payment-mesh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d payment_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Leaf: JWT/verify — host :8081
+  auth-rust:
+    build:
+      context: ./services/auth-rust
+    container_name: auth-rust
+    environment:
+      - OTEL_SERVICE_NAME=auth-rust
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - PORT=8081
+      - RUST_LOG=info
+    ports:
+      - "8081:8081"
+    networks:
+      - payment-mesh
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+
+  # Leaf: product catalog — host :8082
+  catalog-bun:
+    build:
+      context: ./services/catalog-bun
+    container_name: catalog-bun
+    environment:
+      - OTEL_SERVICE_NAME=catalog-bun
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      - PORT=8082
+    ports:
+      - "8082:8082"
+    networks:
+      - payment-mesh
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+
+  # Leaf: charge + ledger write — host :8083
+  payment-dotnet:
+    build:
+      context: ./services/payment-dotnet
+    container_name: payment-dotnet
+    environment:
+      - OTEL_SERVICE_NAME=payment-dotnet
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=payment_db;Username=devuser;Password=devpassword;
+      - ASPNETCORE_URLS=http://0.0.0.0:8083
+      - PORT=8083
+    ports:
+      - "8083:8083"
+    networks:
+      - payment-mesh
+    depends_on:
+      - jaeger
+      - postgres
+    restart: unless-stopped
+
+  # Orchestrator / public gateway — host :8080
+  order-go:
+    build:
+      context: ./services/order-go
+    container_name: order-go
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_SERVICE_NAME=order-go
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - AUTH_SERVICE_URL=http://auth-rust:8081
+      - CATALOG_SERVICE_URL=http://catalog-bun:8082
+      - PAYMENT_SERVICE_URL=http://payment-dotnet:8083
+      - DB_DSN=postgres://devuser:devpassword@postgres:5432/payment_db?sslmode=disable
+      - PORT=8080
+    networks:
+      - payment-mesh
+    depends_on:
+      - jaeger
+      - auth-rust
+      - catalog-bun
+      - payment-dotnet
+      - postgres
+    restart: unless-stopped
