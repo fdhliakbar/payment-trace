@@ -3,7 +3,7 @@
 A polyglot distributed payment microservices architecture `Go`, `Rust`, `C#`, `Bun` containerized with **Podman**, featuring end-to-end distributed tracing via **OpenTelemetry** and **Jaeger**, structured logging, **PostgreSQL** persistence, and interactive OpenAPI docs powered by **Scalar**.
 
 <div align="center">
-    <img src="" alt="banner payment trace projects" />
+    <img src="./payment-trace.png" alt="banner payment trace projects" />
 </div>
 
 ## Flowchart 
@@ -16,11 +16,9 @@ A polyglot distributed payment microservices architecture `Go`, `Rust`, `C#`, `B
 ```bash
 git clone ...
 cd ...
-
 ```
 
 ## Running Infra Only
-Start
 ```bash
 docker compose -f podman-compose.yml up -d
 ```
@@ -73,13 +71,7 @@ docker compose -f podman-compose.yml up -d
 
 
 
-### Jaeger UI Dashboard
-
-<div align="center">
-    <img src="./jaeger-ui.png" width="90%" alt="jaeger ui banners" />
-</div>
-
-### Trace ID
+### With Jaeger
 
 <div align="center">
     <img src="./testing_trace_id.png" width="90%" alt="testing trace id banners" />
